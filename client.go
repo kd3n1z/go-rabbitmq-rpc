@@ -11,95 +11,44 @@ import (
 )
 
 type RpcClient struct {
-	address       string
-	connection    *amqp.Connection
-	channel       *amqp.Channel
-	queue         string
-	goChannels    map[string]chan any
+	rabbitMqConnectable
+
+	Timeout time.Duration
+
 	channelsMutex sync.RWMutex
-	timeout       time.Duration
+	goChannels    map[string]chan any
 }
 
-func CreateClient(address string, timeout time.Duration) *RpcClient {
-	return &RpcClient{address: address, timeout: timeout}
-}
+func (client *RpcClient) Connect() {
+	connectedChannel := make(chan any)
 
-func clientProcessMessage(message amqp.Delivery, client *RpcClient) error {
-	correlationId := message.CorrelationId
+	go client.reconnectRoutine(connectedChannel, "", false, false, true, false, nil, func(message *amqp.Delivery) error {
+		correlationId := message.CorrelationId
 
-	client.channelsMutex.RLock()
-	channel, ok := client.goChannels[correlationId]
-	client.channelsMutex.RUnlock()
+		client.channelsMutex.RLock()
+		channel, ok := client.goChannels[correlationId]
+		client.channelsMutex.RUnlock()
 
-	if !ok {
-		return errors.New("channel " + correlationId + " not found")
-	}
-
-	var resp any
-
-	err := json.Unmarshal(message.Body, &resp)
-
-	if err != nil {
-		return err
-	}
-
-	channel <- resp
-
-	close(channel)
-
-	return nil
-}
-
-func (client *RpcClient) Connect() error {
-	var err error
-
-	client.connection, err = amqp.Dial("amqp://" + client.address)
-	if err != nil {
-		return err
-	}
-
-	client.channel, err = client.connection.Channel()
-	if err != nil {
-		client.connection.Close()
-		return err
-	}
-
-	queue, err := client.channel.QueueDeclare("", false, false, true, false, nil)
-	if err != nil {
-		client.Close()
-		return err
-	}
-
-	client.queue = queue.Name
-
-	msgs, err := client.channel.Consume(client.queue, "", false, false, false, false, nil)
-
-	if err != nil {
-		client.Close()
-		return err
-	}
-
-	client.goChannels = make(map[string]chan any)
-
-	go func() {
-		for message := range msgs {
-			err := clientProcessMessage(message, client)
-
-			if err != nil {
-				message.Nack(false, false)
-				continue
-			}
-
-			message.Ack(false)
+		if !ok {
+			return errors.New("channel '" + correlationId + "' not found")
 		}
-	}()
 
-	return nil
-}
+		var resp any
 
-func (client *RpcClient) Close() {
-	client.channel.Close()
-	client.connection.Close()
+		err := json.Unmarshal(message.Body, &resp)
+
+		if err != nil {
+			return err
+		}
+
+		channel <- resp
+
+		close(channel)
+
+		return nil
+	})
+
+	<-connectedChannel
 }
 
 func randomString(l int) string {
@@ -111,9 +60,13 @@ func randomString(l int) string {
 }
 
 func (client *RpcClient) Call(queue string, function string, data any) (any, error) {
-	correlationId := function + "-" + randomString(32)
+	if client.channel == nil {
+		return nil, errors.New("channel is nil")
+	}
 
-	req, err := json.Marshal(functionCall{Name: function, Data: data})
+	correlationId := randomString(32)
+
+	request, err := json.Marshal(functionCall{Name: function, Data: data})
 
 	if err != nil {
 		return nil, err
@@ -122,6 +75,9 @@ func (client *RpcClient) Call(queue string, function string, data any) (any, err
 	channel := make(chan any, 1)
 
 	client.channelsMutex.Lock()
+	if client.goChannels == nil {
+		client.goChannels = make(map[string]chan any, 1)
+	}
 	client.goChannels[correlationId] = channel
 	client.channelsMutex.Unlock()
 
@@ -139,8 +95,8 @@ func (client *RpcClient) Call(queue string, function string, data any) (any, err
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: correlationId,
-			Body:          req,
-			ReplyTo:       client.queue,
+			Body:          request,
+			ReplyTo:       client.internalQueueName,
 		},
 	)
 
@@ -151,7 +107,13 @@ func (client *RpcClient) Call(queue string, function string, data any) (any, err
 	select {
 	case resp := <-channel:
 		return resp, nil
-	case <-time.After(client.timeout):
+	case <-time.After(client.Timeout):
 		return nil, errors.New("timeout waiting for response")
+	}
+}
+
+func (client *RpcClient) GetFunc(queue string, function string) func(any) (any, error) {
+	return func(data any) (any, error) {
+		return client.Call(queue, function, data)
 	}
 }
