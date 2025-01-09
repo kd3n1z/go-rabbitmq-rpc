@@ -1,6 +1,7 @@
 package mqrpc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -13,10 +14,10 @@ import (
 type RpcClient struct {
 	rabbitMqConnectable
 
-	Timeout time.Duration
-
 	channelsMutex sync.RWMutex
 	goChannels    map[string]chan any
+
+	DefaultTimeout time.Duration
 }
 
 func (client *RpcClient) Connect() {
@@ -59,7 +60,7 @@ func randomString(l int) string {
 	return string(bytes)
 }
 
-func (client *RpcClient) Call(queue string, function string, data any) (any, error) {
+func (client *RpcClient) CallWithContext(ctx context.Context, queue string, function string, data any) (any, error) {
 	if client.channel == nil {
 		return nil, errors.New("channel is nil")
 	}
@@ -107,9 +108,16 @@ func (client *RpcClient) Call(queue string, function string, data any) (any, err
 	select {
 	case resp := <-channel:
 		return resp, nil
-	case <-time.After(client.Timeout):
-		return nil, errors.New("timeout waiting for response")
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
+}
+
+func (client *RpcClient) Call(queue string, function string, data any) (any, error) {
+	ctx, close := context.WithTimeout(context.Background(), client.DefaultTimeout)
+	defer close()
+
+	return client.CallWithContext(ctx, queue, function, data)
 }
 
 func (client *RpcClient) GetFunc(queue string, function string) func(any) (any, error) {
