@@ -15,7 +15,7 @@ type RpcClient struct {
 	rabbitMqConnectable
 
 	channelsMutex sync.RWMutex
-	goChannels    map[string]chan any
+	goChannels    map[string]chan rpcResponse
 
 	DefaultTimeout time.Duration
 }
@@ -34,15 +34,15 @@ func (client *RpcClient) Connect() {
 			return errors.New("channel '" + correlationId + "' not found")
 		}
 
-		var resp any
+		var response rpcResponse
 
-		err := json.Unmarshal(message.Body, &resp)
+		err := json.Unmarshal(message.Body, &response)
 
 		if err != nil {
 			return err
 		}
 
-		channel <- resp
+		channel <- response
 
 		close(channel)
 
@@ -67,17 +67,17 @@ func (client *RpcClient) CallWithContext(ctx context.Context, queue string, func
 
 	correlationId := randomString(32)
 
-	request, err := json.Marshal(functionCall{Name: function, Data: data})
+	request, err := json.Marshal(rpcRequest{Name: function, Data: data})
 
 	if err != nil {
 		return nil, err
 	}
 
-	channel := make(chan any, 1)
+	channel := make(chan rpcResponse, 1)
 
 	client.channelsMutex.Lock()
 	if client.goChannels == nil {
-		client.goChannels = make(map[string]chan any, 1)
+		client.goChannels = make(map[string]chan rpcResponse, 1)
 	}
 	client.goChannels[correlationId] = channel
 	client.channelsMutex.Unlock()
@@ -107,7 +107,10 @@ func (client *RpcClient) CallWithContext(ctx context.Context, queue string, func
 
 	select {
 	case resp := <-channel:
-		return resp, nil
+		if resp.Ok {
+			return resp.Data, nil
+		}
+		return nil, errors.New("rpc server error")
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

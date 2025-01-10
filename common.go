@@ -18,9 +18,14 @@ type rabbitMqConnectable struct {
 	internalQueueName string
 }
 
-type functionCall struct {
+type rpcRequest struct {
 	Name string `json:"name"`
 	Data any    `json:"data"`
+}
+
+type rpcResponse struct {
+	Ok   bool `json:"ok"`
+	Data any  `json:"data"`
 }
 
 type RabbitMqCredentials struct {

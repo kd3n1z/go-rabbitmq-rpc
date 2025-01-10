@@ -31,29 +31,35 @@ func (server *RpcServer) AddHandler(name string, handler RpcHandler) {
 
 func (server *RpcServer) Listen() {
 	server.reconnectRoutine(nil, server.QueueName, true, false, false, false, nil, func(message *amqp.Delivery) error {
-		var call functionCall
+		result, err := func() (any, error) {
+			var call rpcRequest
 
-		err := json.Unmarshal(message.Body, &call)
+			err := json.Unmarshal(message.Body, &call)
+
+			if err != nil {
+				return nil, err
+			}
+
+			server.handlersMutex.RLock()
+			handler, ok := server.handlers[call.Name]
+			server.handlersMutex.RUnlock()
+
+			if !ok {
+				return nil, errors.New(fmt.Sprintf("handler '%s' not found", call.Name))
+			}
+
+			return handler(call.Data)
+		}()
+
+		var response rpcResponse
 
 		if err != nil {
-			return err
+			response = rpcResponse{Ok: false, Data: nil}
+		} else {
+			response = rpcResponse{Ok: true, Data: result}
 		}
 
-		server.handlersMutex.RLock()
-		handler, ok := server.handlers[call.Name]
-		server.handlersMutex.RUnlock()
-
-		if !ok {
-			return errors.New(fmt.Sprintf("handler '%s' not found", call.Name))
-		}
-
-		result, err := handler(call.Data)
-
-		if err != nil {
-			return err
-		}
-
-		response, err := json.Marshal(result)
+		responseBytes, err := json.Marshal(response)
 
 		if err != nil {
 			return err
@@ -67,7 +73,7 @@ func (server *RpcServer) Listen() {
 			amqp.Publishing{
 				ContentType:   "text/plain",
 				CorrelationId: message.CorrelationId,
-				Body:          response,
+				Body:          responseBytes,
 			},
 		)
 	})
