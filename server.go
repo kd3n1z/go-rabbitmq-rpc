@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -51,12 +52,13 @@ func (server *RpcServer) Listen() {
 			return handler(call.Data)
 		}()
 
-		var response rpcResponse
+		var response rpcResponse[any]
 
 		if err != nil {
-			response = rpcResponse{Ok: false, Data: nil}
+			log.Printf("unable to process request %s: %s\n", string(message.Body), err)
+			response = rpcResponse[any]{Ok: false, Data: nil}
 		} else {
-			response = rpcResponse{Ok: true, Data: result}
+			response = rpcResponse[any]{Ok: true, Data: result}
 		}
 
 		responseBytes, err := json.Marshal(response)

@@ -15,7 +15,7 @@ type RpcClient struct {
 	rabbitMqConnectable
 
 	channelsMutex sync.RWMutex
-	goChannels    map[string]chan rpcResponse
+	goChannels    map[string]chan []byte
 
 	DefaultTimeout time.Duration
 }
@@ -34,15 +34,7 @@ func (client *RpcClient) Connect() {
 			return errors.New("channel '" + correlationId + "' not found")
 		}
 
-		var response rpcResponse
-
-		err := json.Unmarshal(message.Body, &response)
-
-		if err != nil {
-			return err
-		}
-
-		channel <- response
+		channel <- message.Body
 
 		close(channel)
 
@@ -60,9 +52,11 @@ func randomString(l int) string {
 	return string(bytes)
 }
 
-func (client *RpcClient) CallWithContext(ctx context.Context, queue string, function string, data any) (any, error) {
+func CallWithContext[T any](ctx context.Context, client *RpcClient, queue string, function string, data any) (T, error) {
+	var zero T
+
 	if client.channel == nil {
-		return nil, errors.New("channel is nil")
+		return zero, errors.New("channel is nil")
 	}
 
 	correlationId := randomString(32)
@@ -70,14 +64,14 @@ func (client *RpcClient) CallWithContext(ctx context.Context, queue string, func
 	request, err := json.Marshal(rpcRequest{Name: function, Data: data})
 
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
 
-	channel := make(chan rpcResponse, 1)
+	channel := make(chan []byte, 1)
 
 	client.channelsMutex.Lock()
 	if client.goChannels == nil {
-		client.goChannels = make(map[string]chan rpcResponse, 1)
+		client.goChannels = make(map[string]chan []byte, 1)
 	}
 	client.goChannels[correlationId] = channel
 	client.channelsMutex.Unlock()
@@ -102,29 +96,38 @@ func (client *RpcClient) CallWithContext(ctx context.Context, queue string, func
 	)
 
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
 
 	select {
-	case resp := <-channel:
-		if resp.Ok {
-			return resp.Data, nil
+	case messageBody := <-channel:
+		var response rpcResponse[T]
+
+		err := json.Unmarshal(messageBody, &response)
+
+		if err != nil {
+			return zero, err
 		}
-		return nil, errors.New("rpc server error")
+
+		if !response.Ok {
+			return zero, errors.New("rpc server error")
+		}
+
+		return response.Data, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return zero, ctx.Err()
 	}
 }
 
-func (client *RpcClient) Call(queue string, function string, data any) (any, error) {
+func Call[T any](client *RpcClient, queue string, function string, data any) (T, error) {
 	ctx, close := context.WithTimeout(context.Background(), client.DefaultTimeout)
 	defer close()
 
-	return client.CallWithContext(ctx, queue, function, data)
+	return CallWithContext[T](ctx, client, queue, function, data)
 }
 
-func (client *RpcClient) GetFunc(queue string, function string) func(any) (any, error) {
-	return func(data any) (any, error) {
-		return client.Call(queue, function, data)
+func GetFunc[T any](client *RpcClient, queue string, function string) func(any) (T, error) {
+	return func(data any) (T, error) {
+		return Call[T](client, queue, function, data)
 	}
 }
