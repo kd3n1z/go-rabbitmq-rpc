@@ -23,9 +23,9 @@ type rpcRequest struct {
 	Data any    `json:"data"`
 }
 
-type rpcResponse[T any] struct {
+type rpcResponse struct {
 	Ok   bool `json:"ok"`
-	Data T    `json:"data"`
+	Data any  `json:"data"`
 }
 
 type RabbitMqCredentials struct {
