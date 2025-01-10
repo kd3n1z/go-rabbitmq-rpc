@@ -75,12 +75,6 @@ func (connectable *rabbitMqConnectable) connect(url string, queueName string, qu
 
 	connectable.internalQueueName = queue.Name
 
-	err = connectable.channel.Qos(1, 0, false)
-
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -116,15 +110,17 @@ func (connectable *rabbitMqConnectable) reconnectRoutine(connectedChannel chan a
 		msgs, err := connectable.channel.Consume(connectable.internalQueueName, "", false, false, false, false, nil)
 
 		if err == nil {
-			for message := range msgs {
-				err = handler(&message)
+			for msg := range msgs {
+				go func(message *amqp.Delivery) {
+					err := handler(message)
 
-				if err == nil {
-					message.Ack(false)
-				} else {
-					log.Printf("error handling %s: %s", string(message.Body), err)
-					message.Nack(false, false)
-				}
+					if err == nil {
+						message.Ack(false)
+					} else {
+						log.Printf("error handling %s: %s", string(message.Body), err)
+						message.Nack(false, false)
+					}
+				}(&msg)
 			}
 		}
 
