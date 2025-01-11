@@ -116,8 +116,8 @@ func (connectable *rabbitMqConnectable) reconnectRoutine(connectedChannel chan a
 
 		if err == nil {
 			for msg := range msgs {
-				go func(message *amqp.Delivery) {
-					err := handler(message)
+				go func(message amqp.Delivery) {
+					err := handler(&message)
 
 					if err == nil {
 						message.Ack(false)
@@ -125,7 +125,7 @@ func (connectable *rabbitMqConnectable) reconnectRoutine(connectedChannel chan a
 						log.Printf("error handling %s: %s", string(message.Body), err)
 						message.Nack(false, false)
 					}
-				}(&msg)
+				}(msg)
 			}
 		}
 
