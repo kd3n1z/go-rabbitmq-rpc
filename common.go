@@ -9,8 +9,12 @@ import (
 )
 
 type rabbitMqConnectable struct {
-	Address     string
-	Credentials RabbitMqCredentials
+	LoggerSuffix  string
+	LogConnection bool
+	LogErrors     bool
+
+	address     string
+	credentials RabbitMqCredentials
 
 	connection *amqp.Connection
 	channel    *amqp.Channel
@@ -34,15 +38,15 @@ type RabbitMqCredentials struct {
 }
 
 func (connectable *rabbitMqConnectable) createAmqpUrl() string {
-	if connectable.Credentials.Username == "" {
-		return fmt.Sprintf("amqp://%s", connectable.Address)
+	if connectable.credentials.Username == "" {
+		return fmt.Sprintf("amqp://%s", connectable.address)
 	}
 
-	if connectable.Credentials.Password == "" {
-		return fmt.Sprintf("amqp://%s@%s", connectable.Credentials.Username, connectable.Address)
+	if connectable.credentials.Password == "" {
+		return fmt.Sprintf("amqp://%s@%s", connectable.credentials.Username, connectable.address)
 	}
 
-	return fmt.Sprintf("amqp://%s:%s@%s", connectable.Credentials.Username, connectable.Credentials.Password, connectable.Address)
+	return fmt.Sprintf("amqp://%s:%s@%s", connectable.credentials.Username, connectable.credentials.Password, connectable.address)
 }
 
 func (connectable *rabbitMqConnectable) close() {
@@ -91,21 +95,21 @@ func (connectable *rabbitMqConnectable) reconnectRoutine(connectedChannel chan a
 	for {
 		if firstIteration {
 			firstIteration = false
-			log.Println("connecting to RabbitMQ...")
+			connectable.tryLog("connecting to RabbitMQ...", connectable.LogConnection)
 
 		} else {
 			time.Sleep(time.Second)
-			log.Println("reconnecting to RabbitMQ...")
+			connectable.tryLog("reconnecting to RabbitMQ...", connectable.LogConnection)
 		}
 
 		err := connectable.connect(url, queueName, queueDurable, queueAutoDelete, queueExclusive, queueNoWait, queueArgs)
 
 		if err != nil {
-			log.Printf("unable to connect to RabbitMQ: %s\n", err)
+			connectable.tryLog(fmt.Sprintf("unable to connect to RabbitMQ: %s", err), connectable.LogConnection)
 			continue
 		}
 
-		log.Println("connection to RabbitMQ established")
+		connectable.tryLog("connection to RabbitMQ established", connectable.LogConnection)
 
 		if connectedChannel != nil {
 			close(connectedChannel)
@@ -122,7 +126,7 @@ func (connectable *rabbitMqConnectable) reconnectRoutine(connectedChannel chan a
 					if err == nil {
 						message.Ack(false)
 					} else {
-						log.Printf("error handling %s: %s", string(message.Body), err)
+						connectable.tryLog(fmt.Sprintf("error handling %s: %s", string(message.Body), err), connectable.LogErrors)
 						message.Nack(false, false)
 					}
 				}(msg)
@@ -130,6 +134,13 @@ func (connectable *rabbitMqConnectable) reconnectRoutine(connectedChannel chan a
 		}
 
 		connectable.close()
-		log.Printf("connection to RabbitMQ closed: %s\n", err)
+		connectable.tryLog(fmt.Sprintf("connection to RabbitMQ closed: %s\n", err), connectable.LogConnection)
 	}
+}
+
+func (connectable *rabbitMqConnectable) tryLog(message string, boolean bool) {
+	if !boolean {
+		return
+	}
+	log.Printf("%s: %s\n", connectable.LoggerSuffix, message)
 }

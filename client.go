@@ -20,6 +20,22 @@ type RpcClient struct {
 	DefaultTimeout time.Duration
 }
 
+func CreateClient(address string, credentials RabbitMqCredentials) *RpcClient {
+	result := RpcClient{
+		goChannels:     make(map[string]chan rpcResponse),
+		DefaultTimeout: 10 * time.Second,
+	}
+
+	result.credentials = credentials
+	result.address = address
+
+	result.LogConnection = true
+	result.LogErrors = true
+	result.LoggerSuffix = "mqrpc-client"
+
+	return &result
+}
+
 func (client *RpcClient) Connect() {
 	connectedChannel := make(chan any)
 
@@ -76,9 +92,6 @@ func (client *RpcClient) CallWithContext(ctx context.Context, queue string, func
 	channel := make(chan rpcResponse, 1)
 
 	client.channelsMutex.Lock()
-	if client.goChannels == nil {
-		client.goChannels = make(map[string]chan rpcResponse, 1)
-	}
 	client.goChannels[correlationId] = channel
 	client.channelsMutex.Unlock()
 
