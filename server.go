@@ -36,7 +36,7 @@ func CreateServer(address string, credentials RabbitMqCredentials, queueName str
 
 	result.LogConnection = true
 	result.LogErrors = true
-	result.LoggerPrefix = "mqrpc-server"
+	result.LoggerPrefix = fmt.Sprintf("mqrpc-server (%s)", queueName)
 
 	return &result
 }
