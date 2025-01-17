@@ -9,7 +9,7 @@ import (
 )
 
 type rabbitMqConnectable struct {
-	LoggerSuffix  string
+	LoggerPrefix  string
 	LogConnection bool
 	LogErrors     bool
 
@@ -142,5 +142,5 @@ func (connectable *rabbitMqConnectable) tryLog(message string, boolean bool) {
 	if !boolean {
 		return
 	}
-	log.Printf("%s: %s\n", connectable.LoggerSuffix, message)
+	log.Printf("%s: %s\n", connectable.LoggerPrefix, message)
 }

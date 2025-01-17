@@ -31,7 +31,7 @@ func CreateClient(address string, credentials RabbitMqCredentials) *RpcClient {
 
 	result.LogConnection = true
 	result.LogErrors = true
-	result.LoggerSuffix = "mqrpc-client"
+	result.LoggerPrefix = "mqrpc-client"
 
 	return &result
 }
