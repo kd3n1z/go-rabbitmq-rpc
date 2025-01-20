@@ -124,7 +124,7 @@ func (client *RpcClient) CallWithContext(ctx context.Context, queue string, func
 			return nil, errors.New(fmt.Sprintf("rpc server error (status %d)", resp[lastIndex]))
 		}
 
-		return resp, nil
+		return resp[:lastIndex], nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
