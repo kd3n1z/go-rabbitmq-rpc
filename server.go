@@ -1,7 +1,6 @@
 package mqrpc
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +13,8 @@ type RpcHandler func([]byte) (any, error)
 
 type RpcServer struct {
 	rabbitMqConnectable
+
+	Serializer RpcSerializer
 
 	LogHandlerErrors bool
 
@@ -39,6 +40,8 @@ func CreateServer(address string, credentials RabbitMqCredentials, queueName str
 	result.LogConnection = true
 	result.LogErrors = true
 	result.LoggerPrefix = fmt.Sprintf("mqrpc-server (%s)", queueName)
+
+	result.Serializer = JsonSerializer{}
 
 	return &result
 }
@@ -77,7 +80,7 @@ func (server *RpcServer) Listen() {
 				server.tryLog(fmt.Sprintf("handler error: %s", err.Error()), server.LogHandlerErrors)
 				response = []byte{StatusHandlerError}
 			} else {
-				response, err = json.Marshal(result)
+				response, err = server.Serializer.Serialize(result)
 
 				if err == nil {
 					response = append(response, StatusOk)

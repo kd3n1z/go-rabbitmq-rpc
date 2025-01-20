@@ -2,7 +2,6 @@ package mqrpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -14,6 +13,8 @@ import (
 
 type RpcClient struct {
 	rabbitMqConnectable
+
+	Serializer RpcSerializer
 
 	channelsMutex sync.RWMutex
 	goChannels    map[string]chan []byte
@@ -33,6 +34,8 @@ func CreateClient(address string, credentials RabbitMqCredentials) *RpcClient {
 	result.LogConnection = true
 	result.LogErrors = true
 	result.LoggerPrefix = "mqrpc-client"
+
+	result.Serializer = JsonSerializer{}
 
 	return &result
 }
@@ -76,7 +79,7 @@ func (client *RpcClient) CallWithContext(ctx context.Context, queue string, func
 
 	correlationId := randomString(32)
 
-	payload, err := json.Marshal(data)
+	payload, err := client.Serializer.Serialize(data)
 
 	if err != nil {
 		return nil, err
