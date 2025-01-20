@@ -8,6 +8,15 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+const idFunctionSplitter = ":"
+
+const (
+	StatusOk                 byte = 0
+	StatusHandlerError       byte = 1
+	StatusHandlerNotFound    byte = 2
+	StatusSerializationError byte = 3
+)
+
 type rabbitMqConnectable struct {
 	LoggerPrefix  string
 	LogConnection bool
@@ -20,16 +29,6 @@ type rabbitMqConnectable struct {
 	channel    *amqp.Channel
 
 	internalQueueName string
-}
-
-type rpcRequest struct {
-	Name string `json:"name"`
-	Data any    `json:"data"`
-}
-
-type rpcResponse struct {
-	Ok   bool `json:"ok"`
-	Data any  `json:"data"`
 }
 
 type RabbitMqCredentials struct {

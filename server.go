@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-type RpcHandler func(any) (any, error)
+type RpcHandler func([]byte) (any, error)
 
 type RpcServer struct {
 	rabbitMqConnectable
@@ -34,6 +35,7 @@ func CreateServer(address string, credentials RabbitMqCredentials, queueName str
 	result.credentials = credentials
 	result.address = address
 
+	result.LogHandlerErrors = true
 	result.LogConnection = true
 	result.LogErrors = true
 	result.LoggerPrefix = fmt.Sprintf("mqrpc-server (%s)", queueName)
@@ -49,39 +51,41 @@ func (server *RpcServer) AddHandler(name string, handler RpcHandler) {
 
 func (server *RpcServer) Listen() {
 	server.reconnectRoutine(nil, server.queueName, true, false, false, false, nil, func(message *amqp.Delivery) error {
-		result, err := func() (any, error) {
-			var call rpcRequest
+		var handlerName string
+		var responseCorrelationId string
 
-			err := json.Unmarshal(message.Body, &call)
-
-			if err != nil {
-				return nil, err
-			}
-
-			server.handlersMutex.RLock()
-			handler, ok := server.handlers[call.Name]
-			server.handlersMutex.RUnlock()
-
-			if !ok {
-				return nil, errors.New(fmt.Sprintf("handler '%s' not found", call.Name))
-			}
-
-			return handler(call.Data)
-		}()
-
-		var response rpcResponse
-
-		if err != nil {
-			server.tryLog(fmt.Sprintf("handler error: %s", err.Error()), server.LogHandlerErrors)
-			response = rpcResponse{Ok: false, Data: nil}
+		if i := strings.Index(message.CorrelationId, idFunctionSplitter); i >= 0 {
+			responseCorrelationId = message.CorrelationId[:i]
+			handlerName = message.CorrelationId[i+1:]
 		} else {
-			response = rpcResponse{Ok: true, Data: result}
+			return errors.New("invalid CorrelationId format")
 		}
 
-		responseBytes, err := json.Marshal(response)
+		server.handlersMutex.RLock()
+		handler, ok := server.handlers[handlerName]
+		server.handlersMutex.RUnlock()
 
-		if err != nil {
-			return err
+		var response []byte
+
+		if !ok {
+			server.tryLog(fmt.Sprintf("handler '%s' not found", handlerName), server.LogErrors)
+			response = []byte{StatusHandlerNotFound}
+		} else {
+			result, err := handler(message.Body)
+
+			if err != nil {
+				server.tryLog(fmt.Sprintf("handler error: %s", err.Error()), server.LogHandlerErrors)
+				response = []byte{StatusHandlerError}
+			} else {
+				response, err = json.Marshal(result)
+
+				if err == nil {
+					response = append(response, StatusOk)
+				} else {
+					server.tryLog(fmt.Sprintf("unable to serialize response"), server.LogErrors)
+					response = []byte{StatusSerializationError}
+				}
+			}
 		}
 
 		return server.channel.Publish(
@@ -91,8 +95,8 @@ func (server *RpcServer) Listen() {
 			false,
 			amqp.Publishing{
 				ContentType:   "text/plain",
-				CorrelationId: message.CorrelationId,
-				Body:          responseBytes,
+				CorrelationId: responseCorrelationId,
+				Body:          response,
 			},
 		)
 	})
